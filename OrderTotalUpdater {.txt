@@ -1,0 +1,68 @@
+public class OrderTotalUpdater {
+
+    public static void updateOrderTotal(Set<Id> orderIds) {
+
+        if (orderIds == null || orderIds.isEmpty()) {
+            return;
+        }
+
+        Map<Id, Decimal> orderTotals = new Map<Id, Decimal>();
+
+        for (SObject item : Database.query(
+            'SELECT Id, AgriEdge_Order__c, Total_Price__c ' +
+            'FROM AgriEdge_OrderItem__c ' +
+            'WHERE AgriEdge_Order__c IN :orderIds'
+        )) {
+
+            Id orderId = (Id)item.get('AgriEdge_Order__c');
+            Decimal totalPrice = (Decimal)item.get('Total_Price__c');
+
+            if (orderId == null) {
+                continue;
+            }
+
+            if (totalPrice == null) {
+                totalPrice = 0;
+            }
+
+            if (!orderTotals.containsKey(orderId)) {
+                orderTotals.put(orderId, 0);
+            }
+
+            orderTotals.put(
+                orderId,
+                orderTotals.get(orderId) + totalPrice
+            );
+        }
+
+        List<AgriEdge_Order__c> ordersToUpdate =
+            new List<AgriEdge_Order__c>();
+
+        for (AgriEdge_Order__c order : [
+            SELECT Id, Total_Amount__c, Payment_Status__c
+            FROM AgriEdge_Order__c
+            WHERE Id IN :orderIds
+        ]) {
+
+            Decimal totalAmount = 0;
+
+            if (orderTotals.containsKey(order.Id)) {
+                totalAmount = orderTotals.get(order.Id);
+            }
+
+            order.Total_Amount__c = totalAmount;
+
+            if (totalAmount > 0) {
+                order.Payment_Status__c = 'Pending';
+            } else {
+                order.Payment_Status__c = 'Paid';
+            }
+
+            ordersToUpdate.add(order);
+        }
+
+        if (!ordersToUpdate.isEmpty()) {
+            update ordersToUpdate;
+        }
+    }
+}

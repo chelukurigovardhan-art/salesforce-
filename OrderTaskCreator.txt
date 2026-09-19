@@ -1,0 +1,31 @@
+public class OrderTaskCreator {
+
+    @InvocableMethod(
+        label='Create Task For New Order'
+        description='Creates a task for the selected orders'
+    )
+    public static void createTaskForNewOrder(List<Id> orderIds) {
+
+        if (orderIds == null || orderIds.isEmpty()) {
+            return;
+        }
+
+        List<Task> tasksToCreate = new List<Task>();
+
+        for (Id orderId : orderIds) {
+
+            Task newTask = new Task(
+                Subject = 'Process New Order',
+                WhatId = orderId,
+                Status = 'Not Started',
+                Priority = 'Normal'
+            );
+
+            tasksToCreate.add(newTask);
+        }
+
+        if (!tasksToCreate.isEmpty()) {
+            insert tasksToCreate;
+        }
+    }
+}

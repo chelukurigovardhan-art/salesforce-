@@ -1,0 +1,196 @@
+public class AgriEdgeOrderShipmentHelper {
+
+    public static void processOrderStatusChange(List<AgriEdge_Order__c> updatedOrders) {
+
+        if (updatedOrders == null || updatedOrders.isEmpty()) {
+            return;
+        }
+
+        Set<Id> orderIds = new Set<Id>();
+
+        for (AgriEdge_Order__c order : updatedOrders) {
+            if (order.Id != null) {
+                orderIds.add(order.Id);
+            }
+        }
+
+        if (orderIds.isEmpty()) {
+            return;
+        }
+
+        Map<Id, SObject> existingShipments = new Map<Id, SObject>();
+
+        String shipmentQuery =
+            'SELECT Id, Order__c, Status__c ' +
+            'FROM AgriEdge_Shipment__c ' +
+            'WHERE Order__c IN :orderIds';
+
+        for (SObject shipment : Database.query(shipmentQuery)) {
+            Id orderId = (Id)shipment.get('Order__c');
+            existingShipments.put(orderId, shipment);
+        }
+
+        Map<Id, List<SObject>> existingOrderItems =
+            new Map<Id, List<SObject>>();
+
+        String orderItemQuery =
+            'SELECT Id, AgriEdge_Order__c ' +
+            'FROM AgriEdge_OrderItem__c ' +
+            'WHERE AgriEdge_Order__c IN :orderIds';
+
+        for (SObject item : Database.query(orderItemQuery)) {
+
+            Id orderId = (Id)item.get('AgriEdge_Order__c');
+
+            if (!existingOrderItems.containsKey(orderId)) {
+                existingOrderItems.put(
+                    orderId,
+                    new List<SObject>()
+                );
+            }
+
+            existingOrderItems.get(orderId).add(item);
+        }
+
+        List<AgriEdge_Order__c> ordersToUpdate =
+            new List<AgriEdge_Order__c>();
+
+        List<SObject> shipmentsToInsert =
+            new List<SObject>();
+
+        List<SObject> shipmentsToUpdate =
+            new List<SObject>();
+
+        List<SObject> shipmentsToDelete =
+            new List<SObject>();
+
+        List<SObject> orderItemsToDelete =
+            new List<SObject>();
+
+        for (AgriEdge_Order__c order : updatedOrders) {
+
+            if (
+                order.Payment_Status__c == 'Paid' &&
+                order.Order_Status__c != 'Delivered'
+            ) {
+
+                ordersToUpdate.add(
+                    new AgriEdge_Order__c(
+                        Id = order.Id,
+                        Order_Status__c = 'Delivered'
+                    )
+                );
+            }
+
+            else if (
+                order.Payment_Status__c == 'Pending' &&
+                order.Order_Status__c != 'Processing'
+            ) {
+
+                ordersToUpdate.add(
+                    new AgriEdge_Order__c(
+                        Id = order.Id,
+                        Order_Status__c = 'Processing'
+                    )
+                );
+            }
+
+            else if (order.Payment_Status__c == 'Failed') {
+
+                ordersToUpdate.add(
+                    new AgriEdge_Order__c(
+                        Id = order.Id,
+                        Order_Status__c = 'Canceled'
+                    )
+                );
+
+                if (existingOrderItems.containsKey(order.Id)) {
+                    orderItemsToDelete.addAll(
+                        existingOrderItems.get(order.Id)
+                    );
+                }
+
+                if (existingShipments.containsKey(order.Id)) {
+                    shipmentsToDelete.add(
+                        existingShipments.get(order.Id)
+                    );
+                }
+            }
+
+            if (
+                order.Order_Status__c == 'Processing' &&
+                !existingShipments.containsKey(order.Id)
+            ) {
+
+                SObject shipment =
+                    Schema.getGlobalDescribe()
+                        .get('AgriEdge_Shipment__c')
+                        .newSObject();
+
+                shipment.put(
+                    'Order__c',
+                    order.Id
+                );
+
+                shipment.put(
+                    'Tracking_Number__c',
+                    'TEST_' + String.valueOf(order.Id)
+                );
+
+                shipment.put(
+                    'Status__c',
+                    'Pending'
+                );
+
+                shipmentsToInsert.add(shipment);
+            }
+
+            else if (
+                order.Order_Status__c == 'Shipped' ||
+                order.Order_Status__c == 'Delivered'
+            ) {
+
+                if (existingShipments.containsKey(order.Id)) {
+
+                    SObject shipment =
+                        existingShipments.get(order.Id);
+
+                    if (order.Order_Status__c == 'Shipped') {
+                        shipment.put(
+                            'Status__c',
+                            'In Transit'
+                        );
+                    }
+                    else {
+                        shipment.put(
+                            'Status__c',
+                            'Delivered'
+                        );
+                    }
+
+                    shipmentsToUpdate.add(shipment);
+                }
+            }
+        }
+
+        if (!ordersToUpdate.isEmpty()) {
+            update ordersToUpdate;
+        }
+
+        if (!shipmentsToInsert.isEmpty()) {
+            insert shipmentsToInsert;
+        }
+
+        if (!shipmentsToUpdate.isEmpty()) {
+            update shipmentsToUpdate;
+        }
+
+        if (!orderItemsToDelete.isEmpty()) {
+            delete orderItemsToDelete;
+        }
+
+        if (!shipmentsToDelete.isEmpty()) {
+            delete shipmentsToDelete;
+        }
+    }
+}
